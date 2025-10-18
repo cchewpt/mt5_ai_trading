@@ -21,9 +21,9 @@ def send_telegram(message):
 # ===============================
 # Parameters & Configuration
 # ===============================
-LOGIN = 333639072
-PASSWORD = "Joe@##12425"
-SERVER = "XMGlobal-MT5 9"
+LOGIN = int(input("Login ID:"))
+PASSWORD = str(input("Password"))
+SERVER = str(input("Server:"))
 DRY_RUN = False                
 SYMBOL = str(input("Symbol(For XM GOLD, BTCUSD):"))
 tf_input = float(input("Timeframe(add number 1 or 5):"))
