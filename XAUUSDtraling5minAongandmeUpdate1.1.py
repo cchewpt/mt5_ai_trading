@@ -22,7 +22,7 @@ def send_telegram(message):
 # Parameters & Configuration
 # ===============================
 LOGIN = int(input("Login ID:"))
-PASSWORD = str(input("Password"))
+PASSWORD = str(input("Password:"))
 SERVER = str(input("Server:"))
 DRY_RUN = False                
 SYMBOL = str(input("Symbol(For XM GOLD, BTCUSD):"))
@@ -182,6 +182,7 @@ def trailing_stop(symbol, positions):
             result = mt5.order_send(request)
             if result.retcode == mt5.TRADE_RETCODE_DONE:
                 print(f"✅ Trailing Stop moved to {new_sl:.2f}")
+                send_telegram(f"กันหน้าทุนแล้วนะไอ้สัส SL ที่ {TRAILING_STOPLOSS} ดอล")
             else:
                 print(f"⚠️ Trailing Stop update failed: {result.comment}")
     return None
@@ -295,6 +296,7 @@ def main_loop():
                 else:
                     if Activation_Buy == False:
                         send_order(SYMBOL, LOT, DEVIATION, MAGIC_NUMBER, dry_run=DRY_RUN)
+                        send_telegram(f"กูบายให้แล้วนะ ที่ราคา{mt5.symbol_info_tick(SYMBOL).ask}")
                         last_minute_run = current_min
                         Activation_Buy = True
             if signal_close == "Close":
