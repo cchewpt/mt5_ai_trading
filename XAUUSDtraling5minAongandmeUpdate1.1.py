@@ -25,26 +25,29 @@ def notify(message):
 # ===============================
 # Parameters & Configuration
 # ===============================
-LOGIN = 91834901
+LOGIN = 333639072
 PASSWORD = "Joe@##12425"
-SERVER = "XMGlobal-MT5 5"
+SERVER = "XMGlobal-MT5 9"
 DRY_RUN = False                
-SYMBOL = "GOLD"
+SYMBOL = str(input("Pair to trade"))
 tf_input = float(input("Timeframe(add number 1 or 5):"))
 if tf_input == 1:
     tf = mt5.TIMEFRAME_M1
 if tf_input == 5:
     tf = mt5.TIMEFRAME_M5
+if tf_input == 15:
+    tf = mt5.TIMEFRAME_M15
 TIMEFRAME = tf
 LOT = 0.01 
 DEVIATION = 400                 
 MAGIC_NUMBER = 234000            
-SL_USD = 8
-TP_USD = 10
-TRAILING_PRICE = 5
-TRAILING_STOPLOSS = 0
+SL_USD = float(input("SL:"))
+TP_USD = float(input("TP"))
+TRAILING_PRICE = float(input("Traling price need before New SL"))
+TRAILING_STOPLOSS = float(input("New SL:"))
 ADX_period = 14
 ATR_period = 7
+last_trade_timestamp = 0
 # ===============================
 # MT5 Connection & Login
 # ===============================
@@ -103,10 +106,10 @@ def get_candle():
 # ===============================
 # order conndition
 # ===============================
-def signal_order(ema_fast, ema_slow, ema_trend, last_candle_close, last_candle_high, previous_candle_high, last_candle_low, previous_candle_low):
-    if ema_fast[-2] > ema_slow[-2] and last_candle_close > ema_trend[-2] and ema_fast[-2] > ema_trend[-2] and ema_slow[-2] > ema_trend[-2]:
+def signal_order(previous_candle_open, previous_candle_close, last_candle_open, last_candle_close):
+    if previous_candle_open > previous_candle_close and last_candle_close > previous_candle_open: #and (last_candle_close - previous_candle_open > 1.5):
         return "BUY"
-    if ema_fast[-2] < ema_slow[-2] and last_candle_close < ema_trend[-2] and ema_fast[-2] < ema_trend[-2] and ema_slow[-2] < ema_trend[-2]:
+    if previous_candle_open < previous_candle_close and last_candle_close < previous_candle_open: #and (previous_candle_open - last_candle_close > 1.5):
         return "SELL"
 # ===============================   
 # Calculate EMA indicators with TA-Lib
@@ -163,14 +166,17 @@ def send_order(symbol, lot, deviation, magic, dry_run=False):
         print(f"❌ Failed to get tick data for {symbol}")
         return None
     price = tick.ask
+    candle = get_candle()
+    last_candle_open = candle['last_open']
+    last_candle_low = candle['last_low']
     atr_value = get_ATR(symbol=SYMBOL, timeframe=TIMEFRAME, period=ATR_period, bars=800)
     sl_usd = SL_USD
     tp_usd = TP_USD
     contract_size = mt5.symbol_info(SYMBOL).trade_contract_size
     price_diff_for_tp = tp_usd / (LOT * contract_size)
     price_diff_for_sl = sl_usd / (LOT * contract_size)
-    tp = price + price_diff_for_tp
-    sl = price - price_diff_for_sl
+    tp = price + ((price - last_candle_low))
+    sl = last_candle_low
     #sl = price - (atr_value * 2)
     #tp = price + (atr_value * 2 * 1.5)
     request = {
@@ -208,14 +214,17 @@ def send_order_sell(symbol, lot, deviation, magic, dry_run=False):
         print(f"❌ Failed to get tick data for {symbol}")
         return None
     price = tick.bid
+    candle = get_candle()
+    last_candle_open = candle['last_open']
+    last_candle_high = candle['last_high']
     atr_value = get_ATR(symbol=SYMBOL, timeframe=TIMEFRAME, period=ATR_period, bars=800)
     sl_usd = SL_USD
     tp_usd = TP_USD
     contract_size = mt5.symbol_info(SYMBOL).trade_contract_size
     price_diff_for_tp = tp_usd / (LOT * contract_size)
     price_diff_for_sl = sl_usd / (LOT * contract_size)
-    tp = price - price_diff_for_tp 
-    sl = price + price_diff_for_sl
+    tp = price - ((last_candle_high - price))
+    sl = last_candle_high
     #sl = price + (atr_value * 2)
     #tp = price - (atr_value * 2 *1.5)
     request = {
@@ -336,34 +345,59 @@ def trailing_stop_sell(symbol, positions):
 #================================
 #Function Close order when EMA crossunder
 #================================
-def close_when_EMA_cross(symbol, lot, deviation, magic, positions):
+def close_order(symbol, lot, deviation, magic, positions):
     tick = mt5.symbol_info_tick(symbol)
     if tick is None:
         print("❌ Failed to get tick data")
         return
     positions = mt5.positions_get(symbol=SYMBOL)
-    ticket = positions[0].ticket
-    price = tick.bid
-    request = {
-    "action": mt5.TRADE_ACTION_DEAL,
-    "symbol": symbol,
-    "volume": lot,
-    "type": mt5.ORDER_TYPE_SELL,     # Opposite of BUY
-    "position": ticket,     # Tell MT5 which position to close
-    "price": price,
-    "magic": magic,
-    "deviation": deviation,
-    "type_time": mt5.ORDER_TIME_GTC,
-    "type_filling": mt5.ORDER_FILLING_IOC
-    }
-    result = mt5.order_send(request)
-    if result is None:
-        print("❌ order_send() failed")
-        return None
-    if result.retcode != mt5.TRADE_RETCODE_DONE:
-        print(f"❌ Order failed: retcode={result.retcode}, comment={result.comment}")
-    else:
-        print(f"✅ Close order cause of crossunder EMA: {result.order}")
+    pos_type = positions[0]
+    if pos_type.type == mt5.POSITION_TYPE_BUY:
+        ticket = positions[0].ticket
+        price = tick.bid
+        request = {
+        "action": mt5.TRADE_ACTION_DEAL,
+        "symbol": symbol,
+        "volume": lot,
+        "type": mt5.ORDER_TYPE_SELL,     # Opposite of BUY
+        "position": ticket,     # Tell MT5 which position to close
+        "price": price,
+        "magic": magic,
+        "deviation": deviation,
+        "type_time": mt5.ORDER_TIME_GTC,
+        "type_filling": mt5.ORDER_FILLING_IOC
+        }
+        result = mt5.order_send(request)
+        if result is None:
+            print("❌ order_send() failed")
+            return None
+        if result.retcode != mt5.TRADE_RETCODE_DONE:
+            print(f"❌ Order failed: retcode={result.retcode}, comment={result.comment}")
+        else:
+            print(f"✅ Close order cause of crossunder EMA: {result.order}")
+    if pos_type.type == mt5.POSITION_TYPE_SELL:
+        ticket = positions[0].ticket
+        price = tick.ask
+        request = {
+        "action": mt5.TRADE_ACTION_DEAL,
+        "symbol": symbol,
+        "volume": lot,
+        "type": mt5.ORDER_TYPE_BUY,     # Opposite of BUY
+        "position": ticket,     # Tell MT5 which position to close
+        "price": price,
+        "magic": magic,
+        "deviation": deviation,
+        "type_time": mt5.ORDER_TIME_GTC,
+        "type_filling": mt5.ORDER_FILLING_IOC
+        }
+        result = mt5.order_send(request)
+        if result is None:
+            print("❌ order_send() failed")
+            return None
+        if result.retcode != mt5.TRADE_RETCODE_DONE:
+            print(f"❌ Order failed: retcode={result.retcode}, comment={result.comment}")
+        else:
+            print(f"✅ Close order cause of crossunder EMA: {result.order}")
     return result
 # ===============================
 # Cooldown function
@@ -422,18 +456,12 @@ def main_loop():
             atr_value = get_ATR(symbol=SYMBOL, timeframe=TIMEFRAME, period=ATR_period, bars=800)
             ema_crossover = check_signal(ema8, ema20, ema200)
             ema_crossunder = check_signal_close(ema8, ema20, ema200)
+            signal_bar_timestamp = df.iloc[-2]['time']
             if current_min != last_minute_run:
                 Activation_Trailing = False
                 Activation_Send = False
-                if ema_crossover == "BUY":
-                    Activation_Buy = False
-                    notify("พร้อมบายแล้วไอ้สัส เตรียมตัว")
-                    last_minute_run = current_min
-                if ema_crossunder == "SELL":
-                    Activation_Sell = False
-                    notify("พร้อมเซลแล้วไอ้สัส เตรียมตัว")
-                    last_minute_run = current_min
-            signal = signal_order(ema8, ema20, ema200, last_candle_close, last_candle_high, previous_candle_high, last_candle_low, previous_candle_low)
+            signal = signal_order(previous_candle_open, previous_candle_close, last_candle_open, last_candle_close)
+            global last_trade_timestamp
             os.system("cls" if os.name == "nt" else "clear")
             print("#" + "=" * 60 + "#")
             print(f"⏰ {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
@@ -478,21 +506,36 @@ def main_loop():
                 if positions and len(positions) > 0:
                     print("Position already open, skipping new order")
                 else:
-                    if Activation_Buy == False:
+                    if last_trade_timestamp == signal_bar_timestamp:
+                        print("Position already book, skipping new order")
+                    else:
                         send_order(SYMBOL, LOT, DEVIATION, MAGIC_NUMBER, dry_run=DRY_RUN)
                         notify(f"กูบายให้แล้วนะ ที่ราคา{mt5.symbol_info_tick(SYMBOL).ask}")
-                        last_minute_run = current_min
-                        Activation_Buy = True
+                        last_trade_timestamp = signal_bar_timestamp
             if signal =="SELL":
                 positions = mt5.positions_get(symbol=SYMBOL)
                 if positions and len(positions) > 0:
                     print("Position already open, skipping new order")  
-                else:  
-                    if Activation_Sell == False:
-                            send_order_sell(SYMBOL, LOT, DEVIATION, MAGIC_NUMBER, dry_run=DRY_RUN)
-                            notify(f"กูเซลแล้วนะ ที่ราคา{mt5.symbol_info_tick(SYMBOL).bid}")
-                            last_minute_run = current_min
-                            Activation_Sell = True
+                else:
+                    if last_trade_timestamp == signal_bar_timestamp:
+                        print("Position already book, skipping new order")
+                    else:  
+                        send_order_sell(SYMBOL, LOT, DEVIATION, MAGIC_NUMBER, dry_run=DRY_RUN)
+                        notify(f"กูเซลแล้วนะ ที่ราคา{mt5.symbol_info_tick(SYMBOL).bid}")
+                        last_trade_timestamp = signal_bar_timestamp
+            positions = mt5.positions_get(symbol=SYMBOL)
+            
+            if positions and len(positions) > 0:
+                pos_type = positions[0]
+                if pos_type.type == mt5.POSITION_TYPE_BUY:
+                    if previous_candle_open > previous_candle_close and last_candle_open > last_candle_close:
+                        close_order(SYMBOL, LOT, DEVIATION, MAGIC_NUMBER, positions)
+                if pos_type.type == mt5.POSITION_TYPE_SELL:
+                    if previous_candle_open < previous_candle_close and last_candle_open < last_candle_close:
+                        close_order(SYMBOL, LOT, DEVIATION, MAGIC_NUMBER, positions)
+            print(f"Time stamp {last_trade_timestamp}")
+            print(f"Bar time stamp {signal_bar_timestamp}")
+            print(signal)
             time.sleep(1)
 
     except KeyboardInterrupt:
